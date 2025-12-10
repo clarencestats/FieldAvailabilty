@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Field Status Admin - Clarence Valley Council</title>
+    <title>Field Status Admin - Clarence Regional Aquatic Centre</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -16,7 +16,6 @@
         const { useState, useEffect, useMemo } = React;
         
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        // Reverted to Anonymous Auth as requested
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
@@ -33,9 +32,12 @@ const firebaseConfig = {
   appId: "1:42038303082:web:6fed53593f0e0c3d9ead13",
   measurementId: "G-C2BTP1N5RT"
 };
-
         const getFieldsCol = (db) => collection(db, "sports_fields_status");
         const getStatusDoc = (db) => doc(db, "sports_fields_status_config", "statuses");
+
+        // --- URL CONSTANTS ---
+        const PREFIX_MAP = "https://maps.app.goo.gl";
+        const PREFIX_COUNCIL = "https://www.clarence.nsw.gov.au";
 
         const LoadingSpinner = () => (
             <div className="flex items-center justify-center p-10">
@@ -139,18 +141,30 @@ const firebaseConfig = {
                 selectedFields.forEach(fieldId => { const ref = doc(getFieldsCol(db), fieldId); batch.update(ref, { currentStatusId: statusId }); });
                 try { await batch.commit(); setSelectedFields(new Set()); } catch (err) { console.error("Bulk update failed:", err); }
             };
-            const handleSaveField = async (name, location, webLink, mapLink) => {
+            
+            const handleSaveField = async (name, location, webLinkSuffix, mapLinkSuffix) => {
                 if (!name.trim()) return;
-                const data = { name: name.trim(), location: location.trim(), webLink: webLink.trim(), mapLink: mapLink.trim() };
+                
+                // Construct full URLs by adding prefixes if user typed anything
+                const webLink = webLinkSuffix.trim() ? PREFIX_COUNCIL + webLinkSuffix.trim() : "";
+                const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
+
+                const data = { name: name.trim(), location: location.trim(), webLink, mapLink };
                 try { if (editingField?.id) await updateDoc(doc(getFieldsCol(db), editingField.id), data); else await addDoc(getFieldsCol(db), { ...data, currentStatusId: statuses[0]?.id || null }); setIsFieldModalOpen(false); setEditingField(null); } catch (err) { console.error(err); }
             };
+            
             const handleDeleteField = async (id) => { if (window.confirm("Delete field?")) try { await deleteDoc(doc(getFieldsCol(db), id)); } catch (err) { console.error(err); } };
-            const handleSaveStatus = async (text, color, infoLink) => {
+            
+            const handleSaveStatus = async (text, color, infoLinkSuffix) => {
                 if (!text.trim()) return;
-                const data = { text: text.trim(), color: color.trim(), infoLink: infoLink?.trim() || "" };
+
+                const infoLink = infoLinkSuffix.trim() ? PREFIX_COUNCIL + infoLinkSuffix.trim() : "";
+
+                const data = { text: text.trim(), color: color.trim(), infoLink };
                 let newStatuses = editingStatus?.id ? statuses.map(s => s.id === editingStatus.id ? { ...s, ...data } : s) : [...statuses, { id: crypto.randomUUID(), ...data }];
                 try { await setDoc(getStatusDoc(db), { options: newStatuses }); setIsStatusModalOpen(false); setEditingStatus(null); } catch (err) { console.error(err); }
             };
+            
             const handleDeleteStatus = async (id) => {
                 const newStatuses = statuses.filter(s => s.id !== id);
                 try { await setDoc(getStatusDoc(db), { options: newStatuses }); const q = query(getFieldsCol(db), where("currentStatusId", "==", id)); const batch = writeBatch(db); (await getDocs(q)).forEach(d => batch.update(d.ref, { currentStatusId: newStatuses[0]?.id || null })); await batch.commit(); } catch (err) { console.error(err); }
@@ -158,32 +172,73 @@ const firebaseConfig = {
             const toggleSelect = (id) => { const newSet = new Set(selectedFields); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedFields(newSet); };
             const toggleSelectAll = () => { if (selectedFields.size === fields.length) setSelectedFields(new Set()); else setSelectedFields(new Set(fields.map(f => f.id))); };
 
-            const renderFieldModal = () => (
-                <Modal isOpen={isFieldModalOpen} onClose={() => { setIsFieldModalOpen(false); setEditingField(null); }} title={editingField ? "Edit Field" : "Add New Field"}>
-                    <form onSubmit={(e) => { e.preventDefault(); handleSaveField(e.target.name.value, e.target.location.value, e.target.webLink.value, e.target.mapLink.value); }}>
-                        <div className="space-y-4">
-                            <div><label className="block text-sm font-medium text-gray-700">Field Name *</label><input required name="name" defaultValue={editingField?.name} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Location / Suburb</label><input name="location" defaultValue={editingField?.location} placeholder="e.g. Yamba" className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Web Link</label><input type="url" name="webLink" defaultValue={editingField?.webLink} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Map Link</label><input type="url" name="mapLink" defaultValue={editingField?.mapLink} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                        </div>
-                        <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsFieldModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
-                    </form>
-                </Modal>
-            );
+            const renderFieldModal = () => {
+                // Strip prefixes for display in edit mode
+                const defaultWebSuffix = editingField?.webLink ? editingField.webLink.replace(PREFIX_COUNCIL, '') : '';
+                const defaultMapSuffix = editingField?.mapLink ? editingField.mapLink.replace(PREFIX_MAP, '') : '';
 
-            const renderStatusModal = () => (
-                <Modal isOpen={isStatusModalOpen} onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} title={editingStatus ? "Edit Status" : "Add New Status"}>
-                    <form onSubmit={(e) => { e.preventDefault(); handleSaveStatus(e.target.text.value, e.target.color.value, e.target.infoLink.value); }}>
-                        <div className="space-y-4">
-                            <div><label className="block text-sm font-medium text-gray-700">Status Text *</label><input required name="text" defaultValue={editingStatus?.text} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Policy URL</label><input type="url" name="infoLink" defaultValue={editingStatus?.infoLink} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                            <div><label className="block text-sm font-medium text-gray-700">Color</label><input type="color" name="color" defaultValue={editingStatus?.color || "#000000"} className="mt-1 h-10 w-20 p-0 border rounded" /></div>
-                        </div>
-                        <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsStatusModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
-                    </form>
-                </Modal>
-            );
+                return (
+                    <Modal isOpen={isFieldModalOpen} onClose={() => { setIsFieldModalOpen(false); setEditingField(null); }} title={editingField ? "Edit Field" : "Add New Field"}>
+                        <form onSubmit={(e) => { e.preventDefault(); handleSaveField(e.target.name.value, e.target.location.value, e.target.webLinkSuffix.value, e.target.mapLinkSuffix.value); }}>
+                            <div className="space-y-4">
+                                <div><label className="block text-sm font-medium text-gray-700">Field Name *</label><input required name="name" defaultValue={editingField?.name} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
+                                <div><label className="block text-sm font-medium text-gray-700">Location / Suburb</label><input name="location" defaultValue={editingField?.location} placeholder="e.g. Yamba" className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
+                                
+                                {/* Web Link Input Group */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Web Link (Council Site)</label>
+                                    <div className="mt-1 flex rounded-md shadow-sm">
+                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">
+                                            {PREFIX_COUNCIL}
+                                        </span>
+                                        <input type="text" name="webLinkSuffix" defaultValue={defaultWebSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
+                                    </div>
+                                </div>
+
+                                {/* Map Link Input Group */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Map Directions Link</label>
+                                    <div className="mt-1 flex rounded-md shadow-sm">
+                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs">
+                                            {PREFIX_MAP}
+                                        </span>
+                                        <input type="text" name="mapLinkSuffix" defaultValue={defaultMapSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsFieldModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
+                        </form>
+                    </Modal>
+                );
+            };
+
+            const renderStatusModal = () => {
+                const defaultInfoSuffix = editingStatus?.infoLink ? editingStatus.infoLink.replace(PREFIX_COUNCIL, '') : '';
+
+                return (
+                    <Modal isOpen={isStatusModalOpen} onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} title={editingStatus ? "Edit Status" : "Add New Status"}>
+                        <form onSubmit={(e) => { e.preventDefault(); handleSaveStatus(e.target.text.value, e.target.color.value, e.target.infoLinkSuffix.value); }}>
+                            <div className="space-y-4">
+                                <div><label className="block text-sm font-medium text-gray-700">Status Text *</label><input required name="text" defaultValue={editingStatus?.text} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
+                                
+                                {/* Policy Link Input Group */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Policy URL (Council Site)</label>
+                                    <div className="mt-1 flex rounded-md shadow-sm">
+                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">
+                                            {PREFIX_COUNCIL}
+                                        </span>
+                                        <input type="text" name="infoLinkSuffix" defaultValue={defaultInfoSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
+                                    </div>
+                                </div>
+
+                                <div><label className="block text-sm font-medium text-gray-700">Color</label><input type="color" name="color" defaultValue={editingStatus?.color || "#000000"} className="mt-1 h-10 w-20 p-0 border rounded" /></div>
+                            </div>
+                            <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsStatusModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
+                        </form>
+                    </Modal>
+                );
+            };
 
             if (loading) return <LoadingSpinner />;
             if (error) return <div className="p-4 text-center text-red-600">{error}</div>;
