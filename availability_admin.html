@@ -8,36 +8,39 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="bg-gray-100 font-sans text-gray-900">
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useRef } = React;
         
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // --- PASSWORD CONFIGURATION ---
-        // CHANGE THIS PASSWORD BELOW
         const ADMIN_PASSWORD = "Open*25*"; 
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBe--2h0tR7n0uxhuqMzzWOhCYdc-o2b4E",
-  authDomain: "cvc-openspaces.firebaseapp.com",
-  projectId: "cvc-openspaces",
-  storageBucket: "cvc-openspaces.firebasestorage.app",
-  messagingSenderId: "230322442542",
-  appId: "1:230322442542:web:524cc85eaa7af1a5a2aabf",
-  measurementId: "G-Z5W4ZCJTPT"
-};
+        const firebaseConfig = {
+            apiKey: "AIzaSyBe--2h0tR7n0uxhuqMzzWOhCYdc-o2b4E",
+            authDomain: "cvc-openspaces.firebaseapp.com",
+            projectId: "cvc-openspaces",
+            storageBucket: "cvc-openspaces.firebasestorage.app",
+            messagingSenderId: "230322442542",
+            appId: "1:230322442542:web:524cc85eaa7af1a5a2aabf",
+            measurementId: "G-Z5W4ZCJTPT"
+        };
+
         const getFieldsCol = (db) => collection(db, "sports_fields_status");
         const getStatusDoc = (db) => doc(db, "sports_fields_status_config", "statuses");
 
         // --- URL CONSTANTS ---
         const PREFIX_MAP = "https://maps.app.goo.gl";
         const PREFIX_COUNCIL = "https://www.clarence.nsw.gov.au";
+        const PREFIX_BOOKABLE = "https://clarence.bookable.net.au";
 
         const LoadingSpinner = () => (
             <div className="flex items-center justify-center p-10">
@@ -46,42 +49,18 @@ const firebaseConfig = {
             </div>
         );
 
-        // Simple Password Overlay Component
         const PasswordScreen = ({ onUnlock }) => {
             const [input, setInput] = useState("");
             const [error, setError] = useState(false);
-
-            const handleSubmit = (e) => {
-                e.preventDefault();
-                if (input === ADMIN_PASSWORD) {
-                    onUnlock();
-                } else {
-                    setError(true);
-                    setInput("");
-                }
-            };
-
+            const handleSubmit = (e) => { e.preventDefault(); if (input === ADMIN_PASSWORD) onUnlock(); else { setError(true); setInput(""); } };
             return (
                 <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
                     <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
                         <h2 className="text-2xl font-bold text-center text-blue-900 mb-2">Restricted Access</h2>
                         <p className="text-center text-gray-600 mb-6">Enter password to manage field status.</p>
-                        
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            <div>
-                                <input 
-                                    type="password" 
-                                    value={input}
-                                    onChange={(e) => { setInput(e.target.value); setError(false); }}
-                                    placeholder="Enter Password"
-                                    className={`w-full p-3 border rounded-md focus:ring-2 focus:outline-none ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-300 focus:ring-blue-200'}`}
-                                    autoFocus
-                                />
-                                {error && <p className="text-red-600 text-sm mt-2">Incorrect password.</p>}
-                            </div>
-                            <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-md hover:bg-blue-700 transition duration-200">
-                                Enter
-                            </button>
+                            <div><input type="password" value={input} onChange={(e) => { setInput(e.target.value); setError(false); }} placeholder="Enter Password" className={`w-full p-3 border rounded-md focus:ring-2 focus:outline-none ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-300 focus:ring-blue-200'}`} autoFocus />{error && <p className="text-red-600 text-sm mt-2">Incorrect password.</p>}</div>
+                            <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-md hover:bg-blue-700 transition duration-200">Enter</button>
                         </form>
                     </div>
                 </div>
@@ -92,7 +71,7 @@ const firebaseConfig = {
             if (!isOpen) return null;
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
-                    <div className="relative w-full max-w-lg rounded-lg bg-white p-6 shadow-xl overflow-y-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                    <div className="relative w-full max-w-2xl rounded-lg bg-white p-6 shadow-xl overflow-y-auto max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
                         <button onClick={onClose} className="absolute -top-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full bg-gray-600 text-white transition hover:bg-gray-800">&times;</button>
                         <h3 className="mb-4 text-xl font-semibold text-gray-900">{title}</h3>
                         <div>{children}</div>
@@ -101,18 +80,104 @@ const firebaseConfig = {
             );
         };
 
+        // --- Extracted Components to fix React Error #310 ---
+
+        const FacilityModal = ({ isOpen, onClose, editingFacility, statuses, onSave }) => {
+            // Need to maintain internal state for subfields that syncs with props
+            const [subFields, setSubFields] = useState([]);
+
+            // Sync state when opening the modal or changing the facility being edited
+            useEffect(() => {
+                if (isOpen) {
+                    setSubFields(editingFacility?.subFields || []);
+                }
+            }, [isOpen, editingFacility]);
+            
+            const addSubField = () => {
+                const defaultStatus = statuses[0]?.id || 'status-closed';
+                setSubFields([...subFields, { id: crypto.randomUUID(), name: "", statusId: defaultStatus }]);
+            };
+
+            const updateSubField = (idx, val) => {
+                const newFields = [...subFields];
+                newFields[idx].name = val;
+                setSubFields(newFields);
+            };
+
+            const removeSubField = (idx) => {
+                const newFields = subFields.filter((_, i) => i !== idx);
+                setSubFields(newFields);
+            };
+
+            const defaultWebSuffix = editingFacility?.webLink ? editingFacility.webLink.replace(PREFIX_BOOKABLE, '') : '';
+            const defaultMapSuffix = editingFacility?.mapLink ? editingFacility.mapLink.replace(PREFIX_MAP, '') : '';
+
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title={editingFacility ? "Edit Facility" : "Add New Facility"}>
+                    <form onSubmit={(e) => { 
+                        e.preventDefault(); 
+                        // Filter out empty subfields
+                        const cleanSubFields = subFields.filter(sf => sf.name.trim() !== "");
+                        onSave(e.target.name.value, e.target.location.value, e.target.webLinkSuffix.value, e.target.mapLinkSuffix.value, cleanSubFields); 
+                    }}>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div><label className="block text-sm font-medium text-gray-700">Facility Name *</label><input required name="name" defaultValue={editingFacility?.name} className="mt-1 block w-full rounded-md border border-gray-300 p-2" placeholder="e.g. Barnier Park" /></div>
+                                <div><label className="block text-sm font-medium text-gray-700">Location</label><input name="location" defaultValue={editingFacility?.location} className="mt-1 block w-full rounded-md border border-gray-300 p-2" placeholder="e.g. Junction Hill" /></div>
+                            </div>
+                            
+                            <div><label className="block text-sm font-medium text-gray-700">Web Link (Bookable)</label><div className="mt-1 flex rounded-md shadow-sm"><span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">{PREFIX_BOOKABLE}</span><input type="text" name="webLinkSuffix" defaultValue={defaultWebSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" /></div></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Map Link</label><div className="mt-1 flex rounded-md shadow-sm"><span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs">{PREFIX_MAP}</span><input type="text" name="mapLinkSuffix" defaultValue={defaultMapSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" /></div></div>
+
+                            <div className="border-t pt-4 mt-4">
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className="block text-sm font-bold text-gray-700">Sub-Fields / Courts</label>
+                                    <button type="button" onClick={addSubField} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">+ Add Field</button>
+                                </div>
+                                <div className="space-y-2 bg-gray-50 p-3 rounded-md max-h-60 overflow-y-auto">
+                                    {subFields.map((sf, idx) => (
+                                        <div key={sf.id || idx} className="flex gap-2">
+                                            <input type="text" value={sf.name} onChange={(e) => updateSubField(idx, e.target.value)} placeholder={`Field Name (e.g. Field ${idx + 1})`} className="flex-1 rounded-md border border-gray-300 p-2 text-sm" required />
+                                            <button type="button" onClick={() => removeSubField(idx)} className="text-red-500 hover:text-red-700 px-2">&times;</button>
+                                        </div>
+                                    ))}
+                                    {subFields.length === 0 && <p className="text-sm text-gray-400 italic text-center">No fields added yet.</p>}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Facility</button></div>
+                    </form>
+                </Modal>
+            );
+        };
+
+        const StatusModal = ({ isOpen, onClose, editingStatus, onSave }) => {
+            const defaultInfoSuffix = editingStatus?.infoLink ? editingStatus.infoLink.replace(PREFIX_COUNCIL, '') : '';
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title={editingStatus ? "Edit Status" : "Add New Status"}>
+                    <form onSubmit={(e) => { e.preventDefault(); onSave(e.target.text.value, e.target.color.value, e.target.infoLinkSuffix.value); }}>
+                        <div className="space-y-4">
+                            <div><label className="block text-sm font-medium text-gray-700">Status Text *</label><input required name="text" defaultValue={editingStatus?.text} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Policy URL (Council)</label><div className="mt-1 flex rounded-md shadow-sm"><span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">{PREFIX_COUNCIL}</span><input type="text" name="infoLinkSuffix" defaultValue={defaultInfoSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" /></div></div>
+                            <div><label className="block text-sm font-medium text-gray-700">Color</label><input type="color" name="color" defaultValue={editingStatus?.color || "#000000"} className="mt-1 h-10 w-20 p-0 border rounded" /></div>
+                        </div>
+                        <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
+                    </form>
+                </Modal>
+            );
+        };
+
         const AdminPage = ({ db }) => {
             const [activeTab, setActiveTab] = useState('editor');
-            const [fields, setFields] = useState([]);
+            const [facilities, setFacilities] = useState([]);
             const [statuses, setStatuses] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
-            const [selectedFields, setSelectedFields] = useState(new Set());
 
-            // Modals state
-            const [isFieldModalOpen, setIsFieldModalOpen] = useState(false);
+            // Modals
+            const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
             const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-            const [editingField, setEditingField] = useState(null);
+            const [editingFacility, setEditingFacility] = useState(null);
             const [editingStatus, setEditingStatus] = useState(null);
 
             useEffect(() => {
@@ -122,9 +187,9 @@ const firebaseConfig = {
                 try {
                     subs.push(onSnapshot(getStatusDoc(db), (docSnap) => setStatuses(docSnap.data()?.options || []), err => { console.error(err); setError("Could not load statuses."); }));
                     subs.push(onSnapshot(query(getFieldsCol(db)), (snapshot) => {
-                        setFields(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.name.localeCompare(b.name)));
+                        setFacilities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.name.localeCompare(b.name)));
                         setLoading(false);
-                    }, err => { console.error(err); setError("Could not load fields."); }));
+                    }, err => { console.error(err); setError("Could not load facilities."); }));
                 } catch (err) { console.error(err); setLoading(false); }
                 return () => subs.forEach(u => u());
             }, [db]);
@@ -135,117 +200,89 @@ const firebaseConfig = {
                 return ((r * 299 + g * 587 + b * 114) / 1000) > 128 ? 'black' : 'white';
             };
 
-            const handleSetFieldStatus = async (fieldId, statusId) => { try { await updateDoc(doc(getFieldsCol(db), fieldId), { currentStatusId: statusId }); } catch (err) { console.error(err); } };
-            const handleBulkStatusUpdate = async (statusId) => {
-                const batch = writeBatch(db);
-                selectedFields.forEach(fieldId => { const ref = doc(getFieldsCol(db), fieldId); batch.update(ref, { currentStatusId: statusId }); });
-                try { await batch.commit(); setSelectedFields(new Set()); } catch (err) { console.error("Bulk update failed:", err); }
+            // --- CRUD ---
+
+            // Update Status of a specific sub-field
+            const handleSetSubFieldStatus = async (facilityId, subFieldId, newStatusId) => {
+                try {
+                    const facilityRef = doc(getFieldsCol(db), facilityId);
+                    const facility = facilities.find(f => f.id === facilityId);
+                    if (!facility) return;
+
+                    const updatedSubFields = facility.subFields.map(sf => 
+                        sf.id === subFieldId ? { ...sf, statusId: newStatusId } : sf
+                    );
+
+                    await updateDoc(facilityRef, { subFields: updatedSubFields });
+                } catch (err) { console.error("Error updating status:", err); }
             };
-            
-            const handleSaveField = async (name, location, webLinkSuffix, mapLinkSuffix) => {
+
+            const handleSaveFacility = async (name, location, webLinkSuffix, mapLinkSuffix, subFieldsList) => {
                 if (!name.trim()) return;
-                
-                // Construct full URLs by adding prefixes if user typed anything
-                const webLink = webLinkSuffix.trim() ? PREFIX_COUNCIL + webLinkSuffix.trim() : "";
+                const webLink = webLinkSuffix.trim() ? PREFIX_BOOKABLE + webLinkSuffix.trim() : "";
                 const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
 
-                const data = { name: name.trim(), location: location.trim(), webLink, mapLink };
-                try { if (editingField?.id) await updateDoc(doc(getFieldsCol(db), editingField.id), data); else await addDoc(getFieldsCol(db), { ...data, currentStatusId: statuses[0]?.id || null }); setIsFieldModalOpen(false); setEditingField(null); } catch (err) { console.error(err); }
+                // Validation
+                if (mapLink && !mapLink.startsWith(PREFIX_MAP)) { alert(`Map links must start with:\n${PREFIX_MAP}`); return; }
+                if (webLink && !webLink.startsWith(PREFIX_BOOKABLE)) { alert(`Web links must start with:\n${PREFIX_BOOKABLE}`); return; }
+
+                const data = { 
+                    name: name.trim(), 
+                    location: location.trim(), 
+                    webLink, 
+                    mapLink,
+                    subFields: subFieldsList // Array of {id, name, statusId}
+                };
+
+                try { 
+                    if (editingFacility?.id) {
+                        await updateDoc(doc(getFieldsCol(db), editingFacility.id), data); 
+                    } else { 
+                        await addDoc(getFieldsCol(db), data); 
+                    }
+                    setIsFacilityModalOpen(false); 
+                    setEditingFacility(null); 
+                } catch (err) { console.error(err); }
             };
-            
-            const handleDeleteField = async (id) => { if (window.confirm("Delete field?")) try { await deleteDoc(doc(getFieldsCol(db), id)); } catch (err) { console.error(err); } };
-            
+
+            const handleDeleteFacility = async (id) => { if (window.confirm("Delete entire facility and all its fields?")) try { await deleteDoc(doc(getFieldsCol(db), id)); } catch (err) { console.error(err); } };
+
             const handleSaveStatus = async (text, color, infoLinkSuffix) => {
                 if (!text.trim()) return;
-
                 const infoLink = infoLinkSuffix.trim() ? PREFIX_COUNCIL + infoLinkSuffix.trim() : "";
-
+                if (infoLink && !infoLink.startsWith(PREFIX_COUNCIL)) { alert(`Policy links must start with:\n${PREFIX_COUNCIL}`); return; }
                 const data = { text: text.trim(), color: color.trim(), infoLink };
                 let newStatuses = editingStatus?.id ? statuses.map(s => s.id === editingStatus.id ? { ...s, ...data } : s) : [...statuses, { id: crypto.randomUUID(), ...data }];
                 try { await setDoc(getStatusDoc(db), { options: newStatuses }); setIsStatusModalOpen(false); setEditingStatus(null); } catch (err) { console.error(err); }
             };
-            
+
             const handleDeleteStatus = async (id) => {
                 const newStatuses = statuses.filter(s => s.id !== id);
-                try { await setDoc(getStatusDoc(db), { options: newStatuses }); const q = query(getFieldsCol(db), where("currentStatusId", "==", id)); const batch = writeBatch(db); (await getDocs(q)).forEach(d => batch.update(d.ref, { currentStatusId: newStatuses[0]?.id || null })); await batch.commit(); } catch (err) { console.error(err); }
-            };
-            const toggleSelect = (id) => { const newSet = new Set(selectedFields); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); setSelectedFields(newSet); };
-            const toggleSelectAll = () => { if (selectedFields.size === fields.length) setSelectedFields(new Set()); else setSelectedFields(new Set(fields.map(f => f.id))); };
-
-            const renderFieldModal = () => {
-                // Strip prefixes for display in edit mode
-                const defaultWebSuffix = editingField?.webLink ? editingField.webLink.replace(PREFIX_COUNCIL, '') : '';
-                const defaultMapSuffix = editingField?.mapLink ? editingField.mapLink.replace(PREFIX_MAP, '') : '';
-
-                return (
-                    <Modal isOpen={isFieldModalOpen} onClose={() => { setIsFieldModalOpen(false); setEditingField(null); }} title={editingField ? "Edit Field" : "Add New Field"}>
-                        <form onSubmit={(e) => { e.preventDefault(); handleSaveField(e.target.name.value, e.target.location.value, e.target.webLinkSuffix.value, e.target.mapLinkSuffix.value); }}>
-                            <div className="space-y-4">
-                                <div><label className="block text-sm font-medium text-gray-700">Field Name *</label><input required name="name" defaultValue={editingField?.name} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                                <div><label className="block text-sm font-medium text-gray-700">Location / Suburb</label><input name="location" defaultValue={editingField?.location} placeholder="e.g. Yamba" className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                                
-                                {/* Web Link Input Group */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Web Link (Council Site)</label>
-                                    <div className="mt-1 flex rounded-md shadow-sm">
-                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">
-                                            {PREFIX_COUNCIL}
-                                        </span>
-                                        <input type="text" name="webLinkSuffix" defaultValue={defaultWebSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
-                                    </div>
-                                </div>
-
-                                {/* Map Link Input Group */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Map Directions Link</label>
-                                    <div className="mt-1 flex rounded-md shadow-sm">
-                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs">
-                                            {PREFIX_MAP}
-                                        </span>
-                                        <input type="text" name="mapLinkSuffix" defaultValue={defaultMapSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsFieldModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
-                        </form>
-                    </Modal>
-                );
-            };
-
-            const renderStatusModal = () => {
-                const defaultInfoSuffix = editingStatus?.infoLink ? editingStatus.infoLink.replace(PREFIX_COUNCIL, '') : '';
-
-                return (
-                    <Modal isOpen={isStatusModalOpen} onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} title={editingStatus ? "Edit Status" : "Add New Status"}>
-                        <form onSubmit={(e) => { e.preventDefault(); handleSaveStatus(e.target.text.value, e.target.color.value, e.target.infoLinkSuffix.value); }}>
-                            <div className="space-y-4">
-                                <div><label className="block text-sm font-medium text-gray-700">Status Text *</label><input required name="text" defaultValue={editingStatus?.text} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
-                                
-                                {/* Policy Link Input Group */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Policy URL (Council Site)</label>
-                                    <div className="mt-1 flex rounded-md shadow-sm">
-                                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">
-                                            {PREFIX_COUNCIL}
-                                        </span>
-                                        <input type="text" name="infoLinkSuffix" defaultValue={defaultInfoSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" />
-                                    </div>
-                                </div>
-
-                                <div><label className="block text-sm font-medium text-gray-700">Color</label><input type="color" name="color" defaultValue={editingStatus?.color || "#000000"} className="mt-1 h-10 w-20 p-0 border rounded" /></div>
-                            </div>
-                            <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={() => setIsStatusModalOpen(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
-                        </form>
-                    </Modal>
-                );
+                try { 
+                    await setDoc(getStatusDoc(db), { options: newStatuses }); 
+                } catch (err) { console.error(err); }
             };
 
             if (loading) return <LoadingSpinner />;
             if (error) return <div className="p-4 text-center text-red-600">{error}</div>;
 
             return (
-                <div className="mx-auto max-w-5xl p-4 sm:p-6 pb-24">
-                    {renderFieldModal()} {renderStatusModal()}
+                <div className="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
+                    <FacilityModal 
+                        isOpen={isFacilityModalOpen} 
+                        onClose={() => { setIsFacilityModalOpen(false); setEditingFacility(null); }} 
+                        editingFacility={editingFacility}
+                        statuses={statuses}
+                        onSave={handleSaveFacility}
+                    />
+                    
+                    <StatusModal 
+                        isOpen={isStatusModalOpen} 
+                        onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} 
+                        editingStatus={editingStatus}
+                        onSave={handleSaveStatus}
+                    />
+
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-3xl font-bold text-gray-800">Admin Control Panel</h1>
                         <button onClick={() => window.location.reload()} className="text-sm text-gray-600 hover:text-gray-900 font-medium">Log Out</button>
@@ -253,68 +290,77 @@ const firebaseConfig = {
                     
                     <div className="mb-6 border-b border-gray-200">
                         <nav className="-mb-px flex flex-wrap space-x-4">
-                            {['editor', 'fields', 'statuses'].map(t => (
+                            {['editor', 'facilities', 'statuses'].map(t => (
                                 <button key={t} onClick={() => setActiveTab(t)} className={`px-4 py-2 font-medium capitalize border-b-2 ${activeTab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                                    {t === 'editor' ? 'Set Statuses' : t === 'fields' ? 'Manage Fields' : 'Manage Options'}
+                                    {t === 'editor' ? 'Status Board' : t === 'facilities' ? 'Manage Facilities' : 'Manage Options'}
                                 </button>
                             ))}
                         </nav>
                     </div>
 
                     <div className="rounded-lg bg-gray-50 p-4 shadow-inner sm:p-6">
+                        {/* 1. EDITOR TAB */}
                         {activeTab === 'editor' && (
-                            <div>
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-semibold">Update Status</h2>
-                                    <button onClick={toggleSelectAll} className="text-sm text-blue-600 hover:underline">
-                                        {selectedFields.size === fields.length ? 'Deselect All' : 'Select All'}
-                                    </button>
-                                </div>
-                                <div className="space-y-4">
-                                    {fields.map(field => (
-                                        <div key={field.id} className={`flex flex-col sm:flex-row rounded-lg border bg-white p-4 shadow-sm transition-colors ${selectedFields.has(field.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
-                                            <div className="flex items-center mb-3 sm:mb-0 sm:mr-4">
-                                                <input type="checkbox" checked={selectedFields.has(field.id)} onChange={() => toggleSelect(field.id)} className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                                            </div>
-                                            <div className="flex-grow mb-3 sm:mb-0">
-                                                <span className="block text-lg font-medium text-gray-800">{field.name}</span>
-                                                {field.location && <span className="text-sm text-gray-500">{field.location}</span>}
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {statuses.map(status => {
-                                                    const active = field.currentStatusId === status.id;
-                                                    return (
-                                                        <button key={status.id} onClick={() => handleSetFieldStatus(field.id, status.id)} 
-                                                            className={`px-3 py-1 rounded text-sm font-bold border-2 transition-all ${active ? 'scale-105 shadow-sm' : 'opacity-60 hover:opacity-100'}`}
-                                                            style={{ backgroundColor: active ? status.color : 'transparent', borderColor: status.color, color: active ? getContrastColor(status.color) : status.color }}>
-                                                            {status.text}
-                                                        </button>
-                                                    )
-                                                })}
+                            <div className="space-y-8">
+                                {facilities.map(facility => (
+                                    <div key={facility.id} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                                        <div className="bg-gray-100 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                                            <div>
+                                                <h3 className="text-lg font-bold text-gray-800">{facility.name}</h3>
+                                                {facility.location && <p className="text-xs text-gray-500">{facility.location}</p>}
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="divide-y divide-gray-100">
+                                            {(!facility.subFields || facility.subFields.length === 0) ? (
+                                                <p className="p-4 text-sm text-gray-400 italic">No sub-fields configured.</p>
+                                            ) : facility.subFields.map(subField => (
+                                                <div key={subField.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                    <span className="font-medium text-gray-700 w-1/3">{subField.name}</span>
+                                                    <div className="flex flex-wrap gap-2 flex-1 justify-end">
+                                                        {statuses.map(status => {
+                                                            const isActive = subField.statusId === status.id;
+                                                            return (
+                                                                <button key={status.id} onClick={() => handleSetSubFieldStatus(facility.id, subField.id, status.id)} 
+                                                                    className={`px-3 py-1.5 rounded text-xs font-bold border-2 transition-all ${isActive ? 'scale-105 shadow-sm' : 'opacity-50 hover:opacity-100'}`}
+                                                                    style={{ backgroundColor: isActive ? status.color : 'transparent', borderColor: status.color, color: isActive ? getContrastColor(status.color) : status.color }}>
+                                                                    {status.text}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                                {facilities.length === 0 && <p className="text-center text-gray-500">No facilities found. Go to 'Manage Facilities' to add one.</p>}
                             </div>
                         )}
 
-                        {activeTab === 'fields' && (
+                        {/* 2. FACILITIES TAB */}
+                        {activeTab === 'facilities' && (
                             <div>
-                                <div className="flex justify-between mb-4"><h2 className="text-xl font-semibold">Manage Fields</h2><button onClick={() => { setEditingField(null); setIsFieldModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add Field</button></div>
-                                <div className="divide-y rounded-md border bg-white">
-                                    {fields.map(f => (
-                                        <div key={f.id} className="p-4 flex justify-between items-center">
+                                <div className="flex justify-between mb-4"><h2 className="text-xl font-semibold">Facilities & Fields</h2><button onClick={() => { setEditingFacility(null); setIsFacilityModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add Facility</button></div>
+                                <div className="space-y-4">
+                                    {facilities.map(f => (
+                                        <div key={f.id} className="bg-white p-4 rounded-md border shadow-sm flex justify-between items-start">
                                             <div>
-                                                <div className="font-medium text-gray-900">{f.name}</div>
-                                                <div className="text-sm text-gray-500">{f.location || "No location set"}</div>
+                                                <div className="font-bold text-gray-900">{f.name}</div>
+                                                <div className="text-sm text-gray-500">{f.location}</div>
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {(f.subFields || []).map(sf => (
+                                                        <span key={sf.id} className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded border">{sf.name}</span>
+                                                    ))}
+                                                </div>
                                             </div>
-                                            <div className="flex gap-2"><button onClick={() => { setEditingField(f); setIsFieldModalOpen(true); }} className="text-yellow-600 hover:underline">Edit</button><button onClick={() => handleDeleteField(f.id)} className="text-red-600 hover:underline">Delete</button></div>
+                                            <div className="flex gap-2"><button onClick={() => { setEditingFacility(f); setIsFacilityModalOpen(true); }} className="text-yellow-600 hover:underline text-sm">Edit</button><button onClick={() => handleDeleteFacility(f.id)} className="text-red-600 hover:underline text-sm">Delete</button></div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
                         
+                        {/* 3. STATUSES TAB */}
                         {activeTab === 'statuses' && (
                             <div>
                                 <div className="flex justify-between mb-4"><h2 className="text-xl font-semibold">Manage Status Options</h2><button onClick={() => { setEditingStatus(null); setIsStatusModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add Status</button></div>
@@ -332,25 +378,6 @@ const firebaseConfig = {
                             </div>
                         )}
                     </div>
-
-                    {/* Bulk Action Bar */}
-                    {selectedFields.size > 0 && activeTab === 'editor' && (
-                        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-40 transform transition-transform">
-                            <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-                                <span className="font-semibold text-gray-700">{selectedFields.size} fields selected</span>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    {statuses.map(status => (
-                                        <button key={status.id} onClick={() => handleBulkStatusUpdate(status.id)} 
-                                            className="px-4 py-2 rounded text-white font-bold shadow hover:opacity-90"
-                                            style={{ backgroundColor: status.color, color: getContrastColor(status.color) }}>
-                                            Set to {status.text}
-                                        </button>
-                                    ))}
-                                    <button onClick={() => setSelectedFields(new Set())} className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">Cancel</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             );
         };
@@ -363,14 +390,28 @@ const firebaseConfig = {
                     await setDoc(statusDocRef, { options: [
                         { id: 'status-open', text: 'Open', color: '#22c55e', infoLink: '' },
                         { id: 'status-closed', text: 'Closed', color: '#ef4444', infoLink: '' },
-                        { id: 'status-wet-weather', text: 'CLOSED Wet Weather Sports Management Policy Applies', color: '#f97316', infoLink: '' }
+                        { id: 'status-wet-weather', text: 'CLOSED Wet Weather Policy Applies', color: '#f97316', infoLink: '' }
                     ]});
                 }
+                
                 const fieldsColRef = getFieldsCol(db);
                 if ((await getDocs(query(fieldsColRef))).empty) {
-                    const names = ["Barnier Park - Soccer Fields - 1", "Barnier Park - Soccer Fields - 2; 3; 4", "Brooms Head Oval, Brooms Head", "Ellem Oval, Grafton"]; 
+                    // Grouped Data for new structure
                     const batch = writeBatch(db);
-                    names.forEach(n => batch.set(doc(fieldsColRef), { name: n, location: "", currentStatusId: 'status-closed', webLink: '', mapLink: '' }));
+                    
+                    const createFacility = (name, loc, fields) => {
+                        const ref = doc(fieldsColRef);
+                        const subFields = fields.map(fname => ({ id: crypto.randomUUID(), name: fname, statusId: 'status-closed' }));
+                        batch.set(ref, { name, location: loc, webLink: "", mapLink: "", subFields });
+                    };
+
+                    createFacility("Barnier Park", "Junction Hill", ["Soccer Fields 1", "Soccer Fields 2, 3, 4 (Junior)", "Terry West Athletics Field"]);
+                    createFacility("Brooms Head Oval", "Brooms Head", ["Main Oval"]);
+                    createFacility("Ellem Oval", "Grafton", ["Upper Fisher"]);
+                    createFacility("Rushforth Park", "South Grafton", ["Junior Area", "Soccer Field 1", "Soccer Field 2", "Soccer Field 3", "Soccer Field 4"]);
+                    createFacility("Wherrett Park", "Maclean", ["Barry Watts Oval (BW1-4)", "Golf Practice Area", "No 1 Cricket Field", "No 2 Cricket Field", "No 3 Cricket Field"]);
+                    createFacility("Yamba Sports Complex", "Yamba", ["Touch Fields 1, 2, 5, 6, 7, 10", "No. 1 Soccer Field", "No. 2 Soccer Field"]);
+
                     await batch.commit();
                 }
             } catch (err) { console.error(err); }
@@ -378,10 +419,9 @@ const firebaseConfig = {
 
         const App = () => {
             const [db, setDb] = useState(null);
-            const [firebaseUser, setFirebaseUser] = useState(null);
             const [isPasswordCorrect, setIsPasswordCorrect] = useState(false);
             const [appReady, setAppReady] = useState(false);
-            const preloadRef = React.useRef(false);
+            const preloadRef = useRef(false);
 
             useEffect(() => {
                 const app = initializeApp(firebaseConfig);
@@ -391,14 +431,12 @@ const firebaseConfig = {
                 
                 const unsub = onAuthStateChanged(_auth, async u => {
                     if (u) {
-                        setFirebaseUser(u);
                         setAppReady(true);
                         if (!preloadRef.current) { 
                             preloadRef.current = true; 
                             await preloadDefaultData(_db); 
                         }
                     } else {
-                        // Automatically sign in anonymously on load
                         signInAnonymously(_auth).catch(console.error);
                     }
                 });
@@ -406,13 +444,7 @@ const firebaseConfig = {
             }, []);
 
             if (!appReady) return <LoadingSpinner />;
-
-            // 1. Password Check
-            if (!isPasswordCorrect) {
-                return <PasswordScreen onUnlock={() => setIsPasswordCorrect(true)} />;
-            }
-
-            // 2. Admin Panel (User is authenticated anonymously AND entered correct password)
+            if (!isPasswordCorrect) return <PasswordScreen onUnlock={() => setIsPasswordCorrect(true)} />;
             return <AdminPage db={db} />;
         };
 
