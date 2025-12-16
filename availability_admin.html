@@ -15,7 +15,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
         
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
@@ -80,13 +80,11 @@
             );
         };
 
-        // --- Extracted Components to fix React Error #310 ---
+        // --- Extracted Components ---
 
         const FacilityModal = ({ isOpen, onClose, editingFacility, statuses, onSave }) => {
-            // Need to maintain internal state for subfields that syncs with props
             const [subFields, setSubFields] = useState([]);
 
-            // Sync state when opening the modal or changing the facility being edited
             useEffect(() => {
                 if (isOpen) {
                     setSubFields(editingFacility?.subFields || []);
@@ -116,7 +114,6 @@
                 <Modal isOpen={isOpen} onClose={onClose} title={editingFacility ? "Edit Facility" : "Add New Facility"}>
                     <form onSubmit={(e) => { 
                         e.preventDefault(); 
-                        // Filter out empty subfields
                         const cleanSubFields = subFields.filter(sf => sf.name.trim() !== "");
                         onSave(e.target.name.value, e.target.location.value, e.target.webLinkSuffix.value, e.target.mapLinkSuffix.value, cleanSubFields); 
                     }}>
@@ -173,6 +170,9 @@
             const [statuses, setStatuses] = useState([]);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
+            
+            // Bulk Selection State: Set of SubField IDs
+            const [selectedSubFields, setSelectedSubFields] = useState(new Set());
 
             // Modals
             const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
@@ -202,46 +202,72 @@
 
             // --- CRUD ---
 
-            // Update Status of a specific sub-field
             const handleSetSubFieldStatus = async (facilityId, subFieldId, newStatusId) => {
                 try {
                     const facilityRef = doc(getFieldsCol(db), facilityId);
                     const facility = facilities.find(f => f.id === facilityId);
                     if (!facility) return;
-
-                    const updatedSubFields = facility.subFields.map(sf => 
-                        sf.id === subFieldId ? { ...sf, statusId: newStatusId } : sf
-                    );
-
+                    const updatedSubFields = facility.subFields.map(sf => sf.id === subFieldId ? { ...sf, statusId: newStatusId } : sf);
                     await updateDoc(facilityRef, { subFields: updatedSubFields });
                 } catch (err) { console.error("Error updating status:", err); }
+            };
+
+            // Bulk Update Logic
+            const handleBulkStatusUpdate = async (statusId) => {
+                const batch = writeBatch(db);
+                let updatesCount = 0;
+
+                facilities.forEach(facility => {
+                    // Check if this facility has any selected subfields
+                    const needsUpdate = facility.subFields.some(sf => selectedSubFields.has(sf.id));
+                    
+                    if (needsUpdate) {
+                        const newSubFields = facility.subFields.map(sf => 
+                            selectedSubFields.has(sf.id) ? { ...sf, statusId } : sf
+                        );
+                        const ref = doc(getFieldsCol(db), facility.id);
+                        batch.update(ref, { subFields: newSubFields });
+                        updatesCount++;
+                    }
+                });
+
+                if (updatesCount > 0) {
+                    try {
+                        await batch.commit();
+                        setSelectedSubFields(new Set()); // Clear selection after success
+                    } catch (err) { console.error("Bulk update failed:", err); }
+                }
+            };
+
+            const toggleSubFieldSelect = (id) => {
+                const newSet = new Set(selectedSubFields);
+                if (newSet.has(id)) newSet.delete(id);
+                else newSet.add(id);
+                setSelectedSubFields(newSet);
+            };
+
+            const toggleSelectAll = () => {
+                const totalSubFieldsCount = facilities.reduce((acc, f) => acc + (f.subFields?.length || 0), 0);
+                if (selectedSubFields.size === totalSubFieldsCount) {
+                    setSelectedSubFields(new Set());
+                } else {
+                    const allIds = new Set();
+                    facilities.forEach(f => f.subFields?.forEach(sf => allIds.add(sf.id)));
+                    setSelectedSubFields(allIds);
+                }
             };
 
             const handleSaveFacility = async (name, location, webLinkSuffix, mapLinkSuffix, subFieldsList) => {
                 if (!name.trim()) return;
                 const webLink = webLinkSuffix.trim() ? PREFIX_BOOKABLE + webLinkSuffix.trim() : "";
                 const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
-
-                // Validation
                 if (mapLink && !mapLink.startsWith(PREFIX_MAP)) { alert(`Map links must start with:\n${PREFIX_MAP}`); return; }
                 if (webLink && !webLink.startsWith(PREFIX_BOOKABLE)) { alert(`Web links must start with:\n${PREFIX_BOOKABLE}`); return; }
-
-                const data = { 
-                    name: name.trim(), 
-                    location: location.trim(), 
-                    webLink, 
-                    mapLink,
-                    subFields: subFieldsList // Array of {id, name, statusId}
-                };
-
+                const data = { name: name.trim(), location: location.trim(), webLink, mapLink, subFields: subFieldsList };
                 try { 
-                    if (editingFacility?.id) {
-                        await updateDoc(doc(getFieldsCol(db), editingFacility.id), data); 
-                    } else { 
-                        await addDoc(getFieldsCol(db), data); 
-                    }
-                    setIsFacilityModalOpen(false); 
-                    setEditingFacility(null); 
+                    if (editingFacility?.id) await updateDoc(doc(getFieldsCol(db), editingFacility.id), data); 
+                    else await addDoc(getFieldsCol(db), data); 
+                    setIsFacilityModalOpen(false); setEditingFacility(null); 
                 } catch (err) { console.error(err); }
             };
 
@@ -258,30 +284,18 @@
 
             const handleDeleteStatus = async (id) => {
                 const newStatuses = statuses.filter(s => s.id !== id);
-                try { 
-                    await setDoc(getStatusDoc(db), { options: newStatuses }); 
-                } catch (err) { console.error(err); }
+                try { await setDoc(getStatusDoc(db), { options: newStatuses }); } catch (err) { console.error(err); }
             };
 
             if (loading) return <LoadingSpinner />;
             if (error) return <div className="p-4 text-center text-red-600">{error}</div>;
 
+            const totalSubFieldsCount = facilities.reduce((acc, f) => acc + (f.subFields?.length || 0), 0);
+
             return (
-                <div className="mx-auto max-w-6xl p-4 sm:p-6 pb-24">
-                    <FacilityModal 
-                        isOpen={isFacilityModalOpen} 
-                        onClose={() => { setIsFacilityModalOpen(false); setEditingFacility(null); }} 
-                        editingFacility={editingFacility}
-                        statuses={statuses}
-                        onSave={handleSaveFacility}
-                    />
-                    
-                    <StatusModal 
-                        isOpen={isStatusModalOpen} 
-                        onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} 
-                        editingStatus={editingStatus}
-                        onSave={handleSaveStatus}
-                    />
+                <div className="mx-auto max-w-6xl p-4 sm:p-6 pb-32">
+                    <FacilityModal isOpen={isFacilityModalOpen} onClose={() => { setIsFacilityModalOpen(false); setEditingFacility(null); }} editingFacility={editingFacility} statuses={statuses} onSave={handleSaveFacility} />
+                    <StatusModal isOpen={isStatusModalOpen} onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} editingStatus={editingStatus} onSave={handleSaveStatus} />
 
                     <div className="flex justify-between items-center mb-6">
                         <h1 className="text-3xl font-bold text-gray-800">Admin Control Panel</h1>
@@ -302,6 +316,12 @@
                         {/* 1. EDITOR TAB */}
                         {activeTab === 'editor' && (
                             <div className="space-y-8">
+                                <div className="flex justify-end mb-2">
+                                    <button onClick={toggleSelectAll} className="text-sm font-medium text-blue-600 hover:text-blue-800 underline">
+                                        {selectedSubFields.size === totalSubFieldsCount && totalSubFieldsCount > 0 ? 'Deselect All' : 'Select All Fields'}
+                                    </button>
+                                </div>
+
                                 {facilities.map(facility => (
                                     <div key={facility.id} className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
                                         <div className="bg-gray-100 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
@@ -313,23 +333,34 @@
                                         <div className="divide-y divide-gray-100">
                                             {(!facility.subFields || facility.subFields.length === 0) ? (
                                                 <p className="p-4 text-sm text-gray-400 italic">No sub-fields configured.</p>
-                                            ) : facility.subFields.map(subField => (
-                                                <div key={subField.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                                    <span className="font-medium text-gray-700 w-1/3">{subField.name}</span>
-                                                    <div className="flex flex-wrap gap-2 flex-1 justify-end">
-                                                        {statuses.map(status => {
-                                                            const isActive = subField.statusId === status.id;
-                                                            return (
-                                                                <button key={status.id} onClick={() => handleSetSubFieldStatus(facility.id, subField.id, status.id)} 
-                                                                    className={`px-3 py-1.5 rounded text-xs font-bold border-2 transition-all ${isActive ? 'scale-105 shadow-sm' : 'opacity-50 hover:opacity-100'}`}
-                                                                    style={{ backgroundColor: isActive ? status.color : 'transparent', borderColor: status.color, color: isActive ? getContrastColor(status.color) : status.color }}>
-                                                                    {status.text}
-                                                                </button>
-                                                            )
-                                                        })}
+                                            ) : facility.subFields.map(subField => {
+                                                const isSelected = selectedSubFields.has(subField.id);
+                                                return (
+                                                    <div key={subField.id} className={`p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors ${isSelected ? 'bg-blue-50' : ''}`}>
+                                                        <div className="flex items-center w-full md:w-1/3">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={isSelected}
+                                                                onChange={() => toggleSubFieldSelect(subField.id)}
+                                                                className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 cursor-pointer"
+                                                            />
+                                                            <span className={`font-medium ${isSelected ? 'text-blue-900' : 'text-gray-700'}`}>{subField.name}</span>
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2 flex-1 justify-end">
+                                                            {statuses.map(status => {
+                                                                const isActive = subField.statusId === status.id;
+                                                                return (
+                                                                    <button key={status.id} onClick={() => handleSetSubFieldStatus(facility.id, subField.id, status.id)} 
+                                                                        className={`px-3 py-1.5 rounded text-xs font-bold border-2 transition-all ${isActive ? 'scale-105 shadow-sm' : 'opacity-50 hover:opacity-100'}`}
+                                                                        style={{ backgroundColor: isActive ? status.color : 'transparent', borderColor: status.color, color: isActive ? getContrastColor(status.color) : status.color }}>
+                                                                        {status.text}
+                                                                    </button>
+                                                                )
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 ))}
@@ -378,6 +409,25 @@
                             </div>
                         )}
                     </div>
+
+                    {/* Bulk Action Bar */}
+                    {selectedSubFields.size > 0 && activeTab === 'editor' && (
+                        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4 z-40 transform transition-transform animate-slide-up">
+                            <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+                                <span className="font-semibold text-gray-700">{selectedSubFields.size} fields selected</span>
+                                <div className="flex flex-wrap justify-center gap-2">
+                                    {statuses.map(status => (
+                                        <button key={status.id} onClick={() => handleBulkStatusUpdate(status.id)} 
+                                            className="px-4 py-2 rounded text-white font-bold shadow hover:opacity-90 transition-transform active:scale-95"
+                                            style={{ backgroundColor: status.color, color: getContrastColor(status.color) }}>
+                                            Set to {status.text}
+                                        </button>
+                                    ))}
+                                    <button onClick={() => setSelectedSubFields(new Set())} className="px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300 font-medium">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -396,22 +446,18 @@
                 
                 const fieldsColRef = getFieldsCol(db);
                 if ((await getDocs(query(fieldsColRef))).empty) {
-                    // Grouped Data for new structure
                     const batch = writeBatch(db);
-                    
                     const createFacility = (name, loc, fields) => {
                         const ref = doc(fieldsColRef);
                         const subFields = fields.map(fname => ({ id: crypto.randomUUID(), name: fname, statusId: 'status-closed' }));
                         batch.set(ref, { name, location: loc, webLink: "", mapLink: "", subFields });
                     };
-
                     createFacility("Barnier Park", "Junction Hill", ["Soccer Fields 1", "Soccer Fields 2, 3, 4 (Junior)", "Terry West Athletics Field"]);
                     createFacility("Brooms Head Oval", "Brooms Head", ["Main Oval"]);
                     createFacility("Ellem Oval", "Grafton", ["Upper Fisher"]);
                     createFacility("Rushforth Park", "South Grafton", ["Junior Area", "Soccer Field 1", "Soccer Field 2", "Soccer Field 3", "Soccer Field 4"]);
                     createFacility("Wherrett Park", "Maclean", ["Barry Watts Oval (BW1-4)", "Golf Practice Area", "No 1 Cricket Field", "No 2 Cricket Field", "No 3 Cricket Field"]);
                     createFacility("Yamba Sports Complex", "Yamba", ["Touch Fields 1, 2, 5, 6, 7, 10", "No. 1 Soccer Field", "No. 2 Soccer Field"]);
-
                     await batch.commit();
                 }
             } catch (err) { console.error(err); }
