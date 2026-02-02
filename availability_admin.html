@@ -36,7 +36,8 @@
             where, 
             getDocs, 
             runTransaction, 
-            writeBatch 
+            writeBatch,
+            serverTimestamp // Imported for time tracking
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // --- PASSWORD CONFIGURATION ---
@@ -247,7 +248,11 @@
                     const facility = facilities.find(f => f.id === facilityId);
                     if (!facility) return;
                     const updatedSubFields = facility.subFields.map(sf => sf.id === subFieldId ? { ...sf, statusId: newStatusId } : sf);
-                    await updateDoc(facilityRef, { subFields: updatedSubFields });
+                    // Updated: include lastUpdated timestamp
+                    await updateDoc(facilityRef, { 
+                        subFields: updatedSubFields,
+                        lastUpdated: serverTimestamp() 
+                    });
                 } catch (err) { console.error("Error updating status:", err); }
             };
 
@@ -265,7 +270,11 @@
                             selectedSubFields.has(sf.id) ? { ...sf, statusId } : sf
                         );
                         const ref = doc(getFieldsCol(db), facility.id);
-                        batch.update(ref, { subFields: newSubFields });
+                        // Updated: include lastUpdated timestamp
+                        batch.update(ref, { 
+                            subFields: newSubFields,
+                            lastUpdated: serverTimestamp()
+                        });
                         updatesCount++;
                     }
                 });
@@ -302,7 +311,17 @@
                 const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
                 if (mapLink && !mapLink.startsWith(PREFIX_MAP)) { alert(`Map links must start with:\n${PREFIX_MAP}`); return; }
                 if (webLink && !webLink.startsWith(PREFIX_BOOKABLE)) { alert(`Web links must start with:\n${PREFIX_BOOKABLE}`); return; }
-                const data = { name: name.trim(), location: location.trim(), webLink, mapLink, subFields: subFieldsList };
+                
+                // Updated: include lastUpdated timestamp
+                const data = { 
+                    name: name.trim(), 
+                    location: location.trim(), 
+                    webLink, 
+                    mapLink, 
+                    subFields: subFieldsList,
+                    lastUpdated: serverTimestamp()
+                };
+                
                 try { 
                     if (editingFacility?.id) await updateDoc(doc(getFieldsCol(db), editingFacility.id), data); 
                     else await addDoc(getFieldsCol(db), data); 
