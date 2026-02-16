@@ -335,7 +335,7 @@
                     await addDoc(getLogsCol(db), {
                         message,
                         timestamp: serverTimestamp(),
-                        user: "Staff" // Since we use a shared login, we log as "Staff"
+                        user: "clarence.stats@gmail.com"
                     });
                 } catch (e) { console.error("Log failed", e); }
             };
