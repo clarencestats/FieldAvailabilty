@@ -9,7 +9,7 @@
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX (Pinned version to prevent require() errors) -->
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
 </head>
 <body class="bg-gray-100 font-sans text-gray-900">
@@ -17,11 +17,11 @@
 
     <!-- Main Application Script -->
     <script type="text/babel" data-type="module" data-presets="react">
-        const { useState, useEffect, useRef, useMemo } = React;
+        const { useState, useEffect, useRef } = React;
         
         // --- FIREBASE IMPORTS (CDN) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { 
             getFirestore, 
             doc, 
@@ -33,17 +33,16 @@
             onSnapshot, 
             collection, 
             query, 
-            where, 
             getDocs, 
-            runTransaction, 
             writeBatch,
-            serverTimestamp // Imported for time tracking
+            serverTimestamp 
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // --- PASSWORD CONFIGURATION ---
-        const ADMIN_PASSWORD = "Open*25*"; 
+        // --- HIDDEN CONFIGURATION ---
+        // Staff only need to know the password. This email is used silently in the background.
+        // CREATE THIS USER IN FIREBASE CONSOLE:
+        const HIDDEN_EMAIL = "clarence.stats@gmail.com"; 
 
-        // --- CONFIGURATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyBe--2h0tR7n0uxhuqMzzWOhCYdc-o2b4E",
             authDomain: "cvc-openspaces.firebaseapp.com",
@@ -77,14 +76,28 @@
             </div>
         );
 
-        const PasswordScreen = ({ onUnlock }) => {
+        // --- PASSWORD SCREEN (Restored Original UX) ---
+        const PasswordScreen = ({ onLogin }) => {
             const [input, setInput] = useState("");
-            const [error, setError] = useState(false);
-            const handleSubmit = (e) => { 
+            const [error, setError] = useState(null);
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => { 
                 e.preventDefault(); 
-                if (input === ADMIN_PASSWORD) onUnlock(); 
-                else { setError(true); setInput(""); } 
+                setError(null);
+                setLoading(true);
+                try {
+                    // We use the hidden email + the user's input password
+                    await onLogin(HIDDEN_EMAIL, input);
+                } catch (err) {
+                    console.error("Login failed", err);
+                    setError("Incorrect password.");
+                    setInput(""); 
+                } finally {
+                    setLoading(false);
+                }
             };
+
             return (
                 <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
                     <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
@@ -95,14 +108,21 @@
                                 <input 
                                     type="password" 
                                     value={input} 
-                                    onChange={(e) => { setInput(e.target.value); setError(false); }} 
+                                    onChange={(e) => { setInput(e.target.value); setError(null); }} 
                                     placeholder="Enter Password" 
                                     className={`w-full p-3 border rounded-md focus:ring-2 focus:outline-none ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-300 focus:ring-blue-200'}`} 
                                     autoFocus 
+                                    disabled={loading}
                                 />
-                                {error && <p className="text-red-600 text-sm mt-2">Incorrect password.</p>}
+                                {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
                             </div>
-                            <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 rounded-md hover:bg-blue-700 transition duration-200">Enter</button>
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className={`w-full bg-blue-600 text-white font-bold py-3 rounded-md hover:bg-blue-700 transition duration-200 ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                            >
+                                {loading ? 'Verifying...' : 'Enter'}
+                            </button>
                         </form>
                     </div>
                 </div>
@@ -122,12 +142,27 @@
             );
         };
 
+        const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+            if (!isOpen) return null;
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title={title}>
+                    <p className="text-gray-700 mb-6">{message}</p>
+                    <div className="flex justify-end space-x-2">
+                        <button onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
+                        <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">Confirm Delete</button>
+                    </div>
+                </Modal>
+            );
+        };
+
         const FacilityModal = ({ isOpen, onClose, editingFacility, statuses, onSave }) => {
             const [subFields, setSubFields] = useState([]);
+            const [error, setError] = useState("");
 
             useEffect(() => {
                 if (isOpen) {
                     setSubFields(editingFacility?.subFields || []);
+                    setError("");
                 }
             }, [isOpen, editingFacility]);
             
@@ -147,16 +182,35 @@
                 setSubFields(newFields);
             };
 
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setError("");
+                
+                const webLinkSuffix = e.target.webLinkSuffix.value;
+                const mapLinkSuffix = e.target.mapLinkSuffix.value;
+
+                const webLink = webLinkSuffix.trim() ? PREFIX_BOOKABLE + webLinkSuffix.trim() : "";
+                const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
+
+                if (mapLink && !mapLink.startsWith(PREFIX_MAP)) {
+                    setError(`Map links must start with: ${PREFIX_MAP}`);
+                    return;
+                }
+                if (webLink && !webLink.startsWith(PREFIX_BOOKABLE)) {
+                    setError(`Web links must start with: ${PREFIX_BOOKABLE}`);
+                    return;
+                }
+
+                const cleanSubFields = subFields.filter(sf => sf.name.trim() !== "");
+                onSave(e.target.name.value, e.target.location.value, webLink, mapLink, cleanSubFields);
+            };
+
             const defaultWebSuffix = editingFacility?.webLink ? editingFacility.webLink.replace(PREFIX_BOOKABLE, '') : '';
             const defaultMapSuffix = editingFacility?.mapLink ? editingFacility.mapLink.replace(PREFIX_MAP, '') : '';
 
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={editingFacility ? "Edit Facility" : "Add New Facility"}>
-                    <form onSubmit={(e) => { 
-                        e.preventDefault(); 
-                        const cleanSubFields = subFields.filter(sf => sf.name.trim() !== "");
-                        onSave(e.target.name.value, e.target.location.value, e.target.webLinkSuffix.value, e.target.mapLinkSuffix.value, cleanSubFields); 
-                    }}>
+                    <form onSubmit={handleSubmit}>
                         <div className="space-y-4">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <div><label className="block text-sm font-medium text-gray-700">Facility Name *</label><input required name="name" defaultValue={editingFacility?.name} className="mt-1 block w-full rounded-md border border-gray-300 p-2" placeholder="e.g. Barnier Park" /></div>
@@ -182,29 +236,55 @@
                                 </div>
                             </div>
                         </div>
-                        <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Facility</button></div>
+                        {error && <div className="mt-3 text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">{error}</div>}
+                        <div className="mt-6 flex justify-end space-x-2">
+                            <button type="button" onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
+                            <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Facility</button>
+                        </div>
                     </form>
                 </Modal>
             );
         };
 
         const StatusModal = ({ isOpen, onClose, editingStatus, onSave }) => {
+            const [error, setError] = useState("");
             const defaultInfoSuffix = editingStatus?.infoLink ? editingStatus.infoLink.replace(PREFIX_COUNCIL, '') : '';
+
+            useEffect(() => {
+                if (isOpen) setError("");
+            }, [isOpen]);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setError("");
+                
+                const infoLinkSuffix = e.target.infoLinkSuffix.value;
+                const infoLink = infoLinkSuffix.trim() ? PREFIX_COUNCIL + infoLinkSuffix.trim() : "";
+                
+                if (infoLink && !infoLink.startsWith(PREFIX_COUNCIL)) {
+                    setError(`Policy links must start with: ${PREFIX_COUNCIL}`);
+                    return;
+                }
+                
+                onSave(e.target.text.value, e.target.color.value, infoLink);
+            };
+
             return (
                 <Modal isOpen={isOpen} onClose={onClose} title={editingStatus ? "Edit Status" : "Add New Status"}>
-                    <form onSubmit={(e) => { e.preventDefault(); onSave(e.target.text.value, e.target.color.value, e.target.infoLinkSuffix.value); }}>
+                    <form onSubmit={handleSubmit}>
                         <div className="space-y-4">
                             <div><label className="block text-sm font-medium text-gray-700">Status Text *</label><input required name="text" defaultValue={editingStatus?.text} className="mt-1 block w-full rounded-md border border-gray-300 p-2" /></div>
                             <div><label className="block text-sm font-medium text-gray-700">Policy URL (Council)</label><div className="mt-1 flex rounded-md shadow-sm"><span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-gray-300 bg-gray-50 text-gray-500 sm:text-xs truncate max-w-[150px]">{PREFIX_COUNCIL}</span><input type="text" name="infoLinkSuffix" defaultValue={defaultInfoSuffix} placeholder="/..." className="flex-1 min-w-0 block w-full px-3 py-2 rounded-none rounded-r-md border border-gray-300 sm:text-sm" /></div></div>
                             <div><label className="block text-sm font-medium text-gray-700">Color</label><input type="color" name="color" defaultValue={editingStatus?.color || "#000000"} className="mt-1 h-10 w-20 p-0 border rounded" /></div>
                         </div>
+                        {error && <div className="mt-3 text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">{error}</div>}
                         <div className="mt-6 flex justify-end space-x-2"><button type="button" onClick={onClose} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button></div>
                     </form>
                 </Modal>
             );
         };
 
-        const AdminPage = ({ db }) => {
+        const AdminPage = ({ db, user, doLogout }) => {
             const [activeTab, setActiveTab] = useState('editor');
             const [facilities, setFacilities] = useState([]);
             const [statuses, setStatuses] = useState([]);
@@ -219,6 +299,9 @@
             const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
             const [editingFacility, setEditingFacility] = useState(null);
             const [editingStatus, setEditingStatus] = useState(null);
+
+            // Delete Confirmation State
+            const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'facility' | 'status', id: string, name: string }
 
             useEffect(() => {
                 if (!db) return;
@@ -248,7 +331,6 @@
                     const facility = facilities.find(f => f.id === facilityId);
                     if (!facility) return;
                     const updatedSubFields = facility.subFields.map(sf => sf.id === subFieldId ? { ...sf, statusId: newStatusId } : sf);
-                    // Updated: include lastUpdated timestamp
                     await updateDoc(facilityRef, { 
                         subFields: updatedSubFields,
                         lastUpdated: serverTimestamp() 
@@ -270,7 +352,6 @@
                             selectedSubFields.has(sf.id) ? { ...sf, statusId } : sf
                         );
                         const ref = doc(getFieldsCol(db), facility.id);
-                        // Updated: include lastUpdated timestamp
                         batch.update(ref, { 
                             subFields: newSubFields,
                             lastUpdated: serverTimestamp()
@@ -305,14 +386,9 @@
                 }
             };
 
-            const handleSaveFacility = async (name, location, webLinkSuffix, mapLinkSuffix, subFieldsList) => {
+            const handleSaveFacility = async (name, location, webLink, mapLink, subFieldsList) => {
                 if (!name.trim()) return;
-                const webLink = webLinkSuffix.trim() ? PREFIX_BOOKABLE + webLinkSuffix.trim() : "";
-                const mapLink = mapLinkSuffix.trim() ? PREFIX_MAP + mapLinkSuffix.trim() : "";
-                if (mapLink && !mapLink.startsWith(PREFIX_MAP)) { alert(`Map links must start with:\n${PREFIX_MAP}`); return; }
-                if (webLink && !webLink.startsWith(PREFIX_BOOKABLE)) { alert(`Web links must start with:\n${PREFIX_BOOKABLE}`); return; }
                 
-                // Updated: include lastUpdated timestamp
                 const data = { 
                     name: name.trim(), 
                     location: location.trim(), 
@@ -329,20 +405,37 @@
                 } catch (err) { console.error(err); }
             };
 
-            const handleDeleteFacility = async (id) => { if (window.confirm("Delete entire facility and all its fields?")) try { await deleteDoc(doc(getFieldsCol(db), id)); } catch (err) { console.error(err); } };
+            const confirmDeleteFacility = (facility) => {
+                setDeleteTarget({ type: 'facility', id: facility.id, name: facility.name });
+            };
 
-            const handleSaveStatus = async (text, color, infoLinkSuffix) => {
+            const confirmDeleteStatus = (status) => {
+                setDeleteTarget({ type: 'status', id: status.id, name: status.text });
+            };
+
+            const executeDelete = async () => {
+                if (!deleteTarget) return;
+
+                try {
+                    if (deleteTarget.type === 'facility') {
+                        await deleteDoc(doc(getFieldsCol(db), deleteTarget.id));
+                    } else if (deleteTarget.type === 'status') {
+                        const newStatuses = statuses.filter(s => s.id !== deleteTarget.id);
+                        await setDoc(getStatusDoc(db), { options: newStatuses });
+                    }
+                } catch (err) {
+                    console.error("Delete failed", err);
+                } finally {
+                    setDeleteTarget(null);
+                }
+            };
+
+            const handleSaveStatus = async (text, color, infoLink) => {
                 if (!text.trim()) return;
-                const infoLink = infoLinkSuffix.trim() ? PREFIX_COUNCIL + infoLinkSuffix.trim() : "";
-                if (infoLink && !infoLink.startsWith(PREFIX_COUNCIL)) { alert(`Policy links must start with:\n${PREFIX_COUNCIL}`); return; }
+                
                 const data = { text: text.trim(), color: color.trim(), infoLink };
                 let newStatuses = editingStatus?.id ? statuses.map(s => s.id === editingStatus.id ? { ...s, ...data } : s) : [...statuses, { id: crypto.randomUUID(), ...data }];
                 try { await setDoc(getStatusDoc(db), { options: newStatuses }); setIsStatusModalOpen(false); setEditingStatus(null); } catch (err) { console.error(err); }
-            };
-
-            const handleDeleteStatus = async (id) => {
-                const newStatuses = statuses.filter(s => s.id !== id);
-                try { await setDoc(getStatusDoc(db), { options: newStatuses }); } catch (err) { console.error(err); }
             };
 
             if (loading) return <LoadingSpinner />;
@@ -354,10 +447,21 @@
                 <div className="mx-auto max-w-6xl p-4 sm:p-6 pb-32">
                     <FacilityModal isOpen={isFacilityModalOpen} onClose={() => { setIsFacilityModalOpen(false); setEditingFacility(null); }} editingFacility={editingFacility} statuses={statuses} onSave={handleSaveFacility} />
                     <StatusModal isOpen={isStatusModalOpen} onClose={() => { setIsStatusModalOpen(false); setEditingStatus(null); }} editingStatus={editingStatus} onSave={handleSaveStatus} />
+                    
+                    <ConfirmationModal 
+                        isOpen={!!deleteTarget} 
+                        onClose={() => setDeleteTarget(null)} 
+                        onConfirm={executeDelete} 
+                        title={deleteTarget?.type === 'facility' ? "Delete Facility?" : "Delete Status Option?"}
+                        message={`Are you sure you want to delete "${deleteTarget?.name}"? This action cannot be undone.`}
+                    />
 
                     <div className="flex justify-between items-center mb-6">
-                        <h1 className="text-3xl font-bold text-gray-800">Admin Control Panel</h1>
-                        <button onClick={() => window.location.reload()} className="text-sm text-gray-600 hover:text-gray-900 font-medium">Log Out</button>
+                        <h1 className="text-3xl font-bold text-gray-800">Control Panel</h1>
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm text-gray-500 hidden sm:inline">Admin</span>
+                            <button onClick={doLogout} className="text-sm text-blue-600 hover:text-blue-900 font-medium">Log Out</button>
+                        </div>
                     </div>
                     
                     <div className="mb-6 border-b border-gray-200">
@@ -442,7 +546,7 @@
                                                     ))}
                                                 </div>
                                             </div>
-                                            <div className="flex gap-2"><button onClick={() => { setEditingFacility(f); setIsFacilityModalOpen(true); }} className="text-yellow-600 hover:underline text-sm">Edit</button><button onClick={() => handleDeleteFacility(f.id)} className="text-red-600 hover:underline text-sm">Delete</button></div>
+                                            <div className="flex gap-2"><button onClick={() => { setEditingFacility(f); setIsFacilityModalOpen(true); }} className="text-yellow-600 hover:underline text-sm">Edit</button><button onClick={() => confirmDeleteFacility(f)} className="text-red-600 hover:underline text-sm">Delete</button></div>
                                         </div>
                                     ))}
                                 </div>
@@ -460,7 +564,7 @@
                                                 <div className="w-6 h-6 rounded-full border" style={{backgroundColor: s.color}}></div>
                                                 <div><div className="font-medium">{s.text}</div>{s.infoLink && <div className="text-xs text-blue-500">Link set</div>}</div>
                                             </div>
-                                            <div className="flex gap-2"><button onClick={() => { setEditingStatus(s); setIsStatusModalOpen(true); }} className="text-yellow-600 hover:underline">Edit</button><button onClick={() => handleDeleteStatus(s.id)} className="text-red-600 hover:underline">Delete</button></div>
+                                            <div className="flex gap-2"><button onClick={() => { setEditingStatus(s); setIsStatusModalOpen(true); }} className="text-yellow-600 hover:underline">Edit</button><button onClick={() => confirmDeleteStatus(s)} className="text-red-600 hover:underline">Delete</button></div>
                                         </div>
                                     ))}
                                 </div>
@@ -523,7 +627,7 @@
 
         const App = () => {
             const [db, setDb] = useState(null);
-            const [isPasswordCorrect, setIsPasswordCorrect] = useState(false);
+            const [user, setUser] = useState(null);
             const [appReady, setAppReady] = useState(false);
             const preloadRef = useRef(false);
 
@@ -531,31 +635,30 @@
                 const _db = getFirestore(app);
                 setDb(_db);
                 
-                const initAuth = async () => {
-                    try {
-                        await signInAnonymously(auth);
-                    } catch (err) {
-                        console.error("Auth init failed:", err);
-                    }
-                };
-
-                initAuth();
-
                 const unsub = onAuthStateChanged(auth, async u => {
-                    if (u) {
-                        setAppReady(true);
-                        if (!preloadRef.current) { 
-                            preloadRef.current = true; 
-                            await preloadDefaultData(_db); 
-                        }
+                    setUser(u);
+                    setAppReady(true);
+                    if (u && !preloadRef.current) { 
+                        preloadRef.current = true; 
+                        await preloadDefaultData(_db); 
                     }
                 });
                 return () => unsub();
             }, []);
 
+            // MODIFIED: Uses hidden email
+            const handleLogin = (hiddenEmail, password) => {
+                return signInWithEmailAndPassword(auth, hiddenEmail, password);
+            };
+
+            const handleLogout = () => {
+                signOut(auth);
+            };
+
             if (!appReady) return <LoadingSpinner />;
-            if (!isPasswordCorrect) return <PasswordScreen onUnlock={() => setIsPasswordCorrect(true)} />;
-            return <AdminPage db={db} />;
+            // MODIFIED: Restored original PasswordScreen
+            if (!user) return <PasswordScreen onLogin={handleLogin} />;
+            return <AdminPage db={db} user={user} doLogout={handleLogout} />;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
