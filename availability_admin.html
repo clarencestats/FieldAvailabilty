@@ -40,8 +40,6 @@
             limit
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        // --- HIDDEN CONFIGURATION ---
-        // Staff only need to know the password. This email is used silently in the background.
         const HIDDEN_EMAIL = "clarence.stats@gmail.com"; 
 
         const firebaseConfig = {
@@ -341,8 +339,6 @@
                     });
                 } catch (e) { console.error("Log failed", e); }
             };
-
-            // --- CRUD ---
 
             const handleSetSubFieldStatus = async (facilityId, subFieldId, newStatusId) => {
                 try {
