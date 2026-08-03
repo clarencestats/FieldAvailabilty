@@ -260,8 +260,10 @@
                             name: sf.name,
                             history: [],
                             totalDowntimeMs: 0,
+                            totalClosedMs: 0,
+                            totalSmpMs: 0,
                             lastKnownStatus: null,
-                            isCurrentlyClosed: false
+                            currentStatusType: 'OPEN'
                         };
                         totalFields++;
                     });
@@ -287,11 +289,15 @@
 
                             if (map[facName] && map[facName].subFields[sfName]) {
                                 const sfData = map[facName].subFields[sfName];
-                                const isClosedStatus = statusText.toLowerCase().includes('closed');
                                 
-                                sfData.history.push({ time, statusText, isClosed: isClosedStatus });
+                                let type = 'OPEN';
+                                const lowerStatus = statusText.toLowerCase();
+                                if (lowerStatus.includes('closed')) type = 'CLOSED';
+                                else if (lowerStatus.includes('sports management') || lowerStatus.includes('smp')) type = 'SMP';
+                                
+                                sfData.history.push({ time, statusText, type });
                                 sfData.lastKnownStatus = statusText;
-                                sfData.isCurrentlyClosed = isClosedStatus;
+                                sfData.currentStatusType = type;
                             }
                         }
                     }
@@ -299,6 +305,8 @@
 
                 // 3. Calculate Downtimes & finalize stats
                 let totalDowntimeGlobalMs = 0;
+                let totalClosedGlobalMs = 0;
+                let totalSmpGlobalMs = 0;
                 let currentlyClosedCount = 0;
                 let maxDowntimeMs = 0;
                 let mostImpactedField = null;
@@ -317,16 +325,21 @@
                 };
 
                 const facLabels = [];
-                const facDowntimeHours = [];
+                const facClosedDays = [];
+                const facSmpDays = [];
                 const statusCounts = {};
 
                 Object.values(map).forEach(fac => {
                     facLabels.push(fac.name);
-                    let facilityTotalMs = 0;
+                    let facilityClosedMs = 0;
+                    let facilitySmpMs = 0;
 
                     Object.values(fac.subFields).forEach(sf => {
-                        let lastClosedTime = null;
-                        sf.totalDowntimeMs = 0; 
+                        let lastTime = null;
+                        let currentType = 'OPEN';
+                        
+                        sf.totalClosedMs = 0; 
+                        sf.totalSmpMs = 0;
                         
                         // Count statuses for doughnut chart based on final state
                         if (sf.lastKnownStatus) {
@@ -334,24 +347,33 @@
                         }
 
                         sf.history.forEach(entry => {
-                            if (entry.isClosed && !lastClosedTime) {
-                                lastClosedTime = entry.time;
-                            } else if (!entry.isClosed && lastClosedTime) {
-                                sf.totalDowntimeMs += getIntersectingMs(lastClosedTime, entry.time, start, end);
-                                lastClosedTime = null;
+                            if (currentType === 'CLOSED' && lastTime) {
+                                sf.totalClosedMs += getIntersectingMs(lastTime, entry.time, start, end);
+                            } else if (currentType === 'SMP' && lastTime) {
+                                sf.totalSmpMs += getIntersectingMs(lastTime, entry.time, start, end);
                             }
+                            currentType = entry.type;
+                            lastTime = entry.time;
                         });
 
-                        // If it's currently closed, calculate downtime up to right now
-                        if (lastClosedTime) {
-                            sf.totalDowntimeMs += getIntersectingMs(lastClosedTime, now, start, end);
+                        // If it's currently in a downtime state, calculate up to right now
+                        if (currentType === 'CLOSED' && lastTime) {
+                            sf.totalClosedMs += getIntersectingMs(lastTime, now, start, end);
+                        } else if (currentType === 'SMP' && lastTime) {
+                            sf.totalSmpMs += getIntersectingMs(lastTime, now, start, end);
                         }
                         
-                        if (sf.isCurrentlyClosed) {
+                        sf.totalDowntimeMs = sf.totalClosedMs + sf.totalSmpMs;
+
+                        if (sf.currentStatusType === 'CLOSED' || sf.currentStatusType === 'SMP') {
                             currentlyClosedCount++;
                         }
                         
-                        facilityTotalMs += sf.totalDowntimeMs;
+                        facilityClosedMs += sf.totalClosedMs;
+                        facilitySmpMs += sf.totalSmpMs;
+                        
+                        totalClosedGlobalMs += sf.totalClosedMs;
+                        totalSmpGlobalMs += sf.totalSmpMs;
                         totalDowntimeGlobalMs += sf.totalDowntimeMs;
 
                         if (sf.totalDowntimeMs > maxDowntimeMs) {
@@ -368,19 +390,28 @@
                         sf.history.reverse();
                     });
                     
-                    facDowntimeHours.push((facilityTotalMs / (1000 * 60 * 60)).toFixed(1));
+                    facClosedDays.push((facilityClosedMs / (1000 * 60 * 60 * 24)).toFixed(1));
+                    facSmpDays.push((facilitySmpMs / (1000 * 60 * 60 * 24)).toFixed(1));
                 });
 
                 const facilityChartData = {
                     labels: facLabels,
-                    datasets: [{
-                        label: 'Hours Closed',
-                        data: facDowntimeHours,
-                        backgroundColor: 'rgba(99, 102, 241, 0.85)',
-                        hoverBackgroundColor: 'rgba(79, 70, 229, 1)',
-                        borderRadius: 6,
-                        borderSkipped: false
-                    }]
+                    datasets: [
+                        {
+                            label: 'Closed (Days)',
+                            data: facClosedDays,
+                            backgroundColor: 'rgba(239, 68, 68, 0.85)', // Red-500
+                            hoverBackgroundColor: 'rgba(220, 38, 38, 1)',
+                            borderRadius: 4,
+                        },
+                        {
+                            label: 'Sports Mgt (Days)',
+                            data: facSmpDays,
+                            backgroundColor: 'rgba(245, 158, 11, 0.85)', // Amber-500
+                            hoverBackgroundColor: 'rgba(217, 119, 6, 1)',
+                            borderRadius: 4,
+                        }
+                    ]
                 };
 
                 const statusChartData = {
@@ -454,12 +485,12 @@
                     }]
                 };
 
-                // Helper to format ms to human readable
-                const formatMs = (ms) => {
-                    if (ms === 0) return "0 hrs";
-                    const hours = ms / (1000 * 60 * 60);
-                    if (hours > 24) return `${(hours/24).toFixed(1)} days`;
-                    return `${hours.toFixed(1)} hrs`;
+                // Helper to format ms to human readable Days
+                const formatDays = (ms) => {
+                    if (ms === 0) return "0 days";
+                    const days = ms / (1000 * 60 * 60 * 24);
+                    const val = days.toFixed(1);
+                    return `${val} ${val === '1.0' ? 'day' : 'days'}`;
                 };
 
                 return { 
@@ -467,7 +498,7 @@
                     globalStats: {
                         totalFields,
                         currentlyClosedCount,
-                        formatMs,
+                        formatDays,
                         getAvailabilityPct
                     },
                     engineData: {
@@ -578,9 +609,9 @@
                                                 <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                                             </div>
                                             <div>
-                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Closed Right Now</p>
+                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unavailable Right Now</p>
                                                 <p className="text-3xl font-black text-red-600 mt-1 tracking-tight">{globalStats.currentlyClosedCount || 0}</p>
-                                                <p className="text-[10px] text-slate-400 font-semibold mt-1">Fields currently marked closed</p>
+                                                <p className="text-[10px] text-slate-400 font-semibold mt-1">Fields closed or in sports mgt</p>
                                             </div>
                                         </div>
                                         <div className="bg-gradient-to-br from-white to-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 flex items-center gap-5 group">
@@ -588,9 +619,9 @@
                                                 <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                             </div>
                                             <div>
-                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cumulative Time Closed</p>
-                                                <p className="text-3xl font-black text-indigo-600 mt-1 tracking-tight">{globalStats.formatMs ? globalStats.formatMs(engineData.totalGlobalDowntime) : '0 hrs'}</p>
-                                                <p className="text-[10px] text-slate-400 font-semibold mt-1 leading-tight">Combined hours closed for all fields<br/>within selected dates</p>
+                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cumulative Time Unavailable</p>
+                                                <p className="text-3xl font-black text-indigo-600 mt-1 tracking-tight">{globalStats.formatDays ? globalStats.formatDays(engineData.totalGlobalDowntime) : '0 days'}</p>
+                                                <p className="text-[10px] text-slate-400 font-semibold mt-1 leading-tight">Combined days closed or in sports mgt<br/>within selected dates</p>
                                             </div>
                                         </div>
                                     </div>
@@ -599,11 +630,17 @@
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[400px]">
                                         <div className="lg:col-span-2 h-full">
                                             <ChartWidget 
-                                                title="Time Closed by Facility" 
-                                                subtitle="Total hours marked as closed within selected dates"
+                                                title="Time Unavailable by Facility" 
+                                                subtitle="Breakdown of 'Closed' vs 'Sports Management Policy' (in days)"
                                                 type="bar" 
                                                 data={engineData.facilityChartData} 
-                                                options={{ indexAxis: 'y' }} 
+                                                options={{ 
+                                                    indexAxis: 'y',
+                                                    scales: {
+                                                        x: { stacked: true },
+                                                        y: { stacked: true }
+                                                    }
+                                                }} 
                                             />
                                         </div>
                                         <div className="h-full">
@@ -661,14 +698,23 @@
                                                         <div>
                                                             <div className="flex items-center justify-between mb-4">
                                                                 <h3 className="text-lg font-bold text-slate-800">{sf.name}</h3>
-                                                                <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${sf.isCurrentlyClosed ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-green-100 text-green-700 border border-green-200'}`}>
-                                                                    {sf.isCurrentlyClosed ? 'CURRENTLY CLOSED' : 'OPEN'}
+                                                                <span className={`px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
+                                                                    sf.currentStatusType === 'CLOSED' ? 'bg-red-100 text-red-700 border border-red-200' : 
+                                                                    sf.currentStatusType === 'SMP' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 
+                                                                    'bg-green-100 text-green-700 border border-green-200'
+                                                                }`}>
+                                                                    {sf.currentStatusType === 'CLOSED' ? 'CURRENTLY CLOSED' : 
+                                                                     sf.currentStatusType === 'SMP' ? 'SPORTS MANAGEMENT' : 'OPEN'}
                                                                 </span>
                                                             </div>
                                                             <div className="mt-6 mb-4">
-                                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Time Closed in Period</p>
-                                                                <p className="text-3xl font-black text-indigo-600">{globalStats.formatMs(sf.totalDowntimeMs)}</p>
-                                                                {(startDate || endDate) && <p className="text-xs text-slate-400 mt-1">calculated within selected dates</p>}
+                                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Time Unavailable</p>
+                                                                <p className="text-3xl font-black text-indigo-600">{globalStats.formatDays(sf.totalDowntimeMs)}</p>
+                                                                <div className="flex gap-4 mt-2">
+                                                                    <p className="text-xs font-medium text-slate-500"><span className="text-red-500 font-bold">Closed:</span> {globalStats.formatDays(sf.totalClosedMs)}</p>
+                                                                    <p className="text-xs font-medium text-slate-500"><span className="text-amber-500 font-bold">Sports Mgt:</span> {globalStats.formatDays(sf.totalSmpMs)}</p>
+                                                                </div>
+                                                                {(startDate || endDate) && <p className="text-xs text-slate-400 mt-2">calculated within selected dates</p>}
                                                             </div>
                                                             
                                                             <div className="mt-4 pt-4 border-t border-slate-200">
@@ -699,7 +745,11 @@
                                                                 {sf.filteredHistory.map((entry, i) => (
                                                                     <div key={i} className="relative">
                                                                         {/* Timeline Dot */}
-                                                                        <div className={`absolute -left-[1.3rem] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${entry.isClosed ? 'bg-red-500' : 'bg-emerald-500'}`}></div>
+                                                                        <div className={`absolute -left-[1.3rem] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white ${
+                                                                            entry.type === 'CLOSED' ? 'bg-red-500' : 
+                                                                            entry.type === 'SMP' ? 'bg-amber-500' : 
+                                                                            'bg-emerald-500'
+                                                                        }`}></div>
                                                                         
                                                                         <div>
                                                                             <p className="text-sm font-bold text-slate-800">Set to {entry.statusText}</p>
