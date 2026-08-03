@@ -195,24 +195,9 @@
             
             const [selectedFacName, setSelectedFacName] = useState('OVERVIEW');
             
-            // Set default date range to last month
-            const getInitialDates = () => {
-                const now = new Date();
-                const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-                
-                // Format the local date manually to avoid UTC conversion shifts
-                const formatDate = (date) => {
-                    const year = date.getFullYear();
-                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                    const day = String(date.getDate()).padStart(2, '0');
-                    return `${year}-${month}-${day}`;
-                };
-                return { start: formatDate(firstDayLastMonth), end: formatDate(lastDayLastMonth) };
-            };
-
-            const [startDate, setStartDate] = useState(getInitialDates().start);
-            const [endDate, setEndDate] = useState(getInitialDates().end);
+            // Default to 'All Time' so recent changes aren't accidentally filtered out
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
 
             // Fetch all data
             useEffect(() => {
@@ -291,9 +276,24 @@
                                 const sfData = map[facName].subFields[sfName];
                                 
                                 let type = 'OPEN';
-                                const lowerStatus = statusText.toLowerCase();
-                                if (lowerStatus.includes('closed')) type = 'CLOSED';
-                                else if (lowerStatus.includes('sports management') || lowerStatus.includes('smp')) type = 'SMP';
+                                // Strip out spaces and special characters to make matching foolproof
+                                const normalizedStatus = statusText.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                
+                                // Check for Sports Management FIRST because the status might also contain the word "closed"
+                                // e.g., "CLOSED Wet Weather Sports Management Policy Applies"
+                                if (
+                                    normalizedStatus.includes('sportsmanagement') || 
+                                    normalizedStatus.includes('sportmanagement') || 
+                                    normalizedStatus.includes('sportsmgt') || 
+                                    normalizedStatus.includes('sportmgt') ||
+                                    normalizedStatus.includes('sportsmgmt') ||
+                                    normalizedStatus.includes('sportmgmt') ||
+                                    normalizedStatus.includes('smp')
+                                ) {
+                                    type = 'SMP';
+                                } else if (normalizedStatus.includes('closed')) {
+                                    type = 'CLOSED';
+                                }
                                 
                                 sfData.history.push({ time, statusText, type });
                                 sfData.lastKnownStatus = statusText;
@@ -390,8 +390,8 @@
                         sf.history.reverse();
                     });
                     
-                    facClosedDays.push((facilityClosedMs / (1000 * 60 * 60 * 24)).toFixed(1));
-                    facSmpDays.push((facilitySmpMs / (1000 * 60 * 60 * 24)).toFixed(1));
+                    facClosedDays.push((facilityClosedMs / (1000 * 60 * 60 * 24)).toFixed(2));
+                    facSmpDays.push((facilitySmpMs / (1000 * 60 * 60 * 24)).toFixed(2));
                 });
 
                 const facilityChartData = {
@@ -489,8 +489,9 @@
                 const formatDays = (ms) => {
                     if (ms === 0) return "0 days";
                     const days = ms / (1000 * 60 * 60 * 24);
-                    const val = days.toFixed(1);
-                    return `${val} ${val === '1.0' ? 'day' : 'days'}`;
+                    // Use parseFloat to trim trailing zeros (e.g. 1.50 -> 1.5, 1.00 -> 1)
+                    const val = parseFloat(days.toFixed(2));
+                    return `${val} ${val === 1 ? 'day' : 'days'}`;
                 };
 
                 return { 
